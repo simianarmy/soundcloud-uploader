@@ -75,7 +75,7 @@ class SoundCloudUploader
         # map array of ids to array of track objects:
         tracks = track_ids.uniq.map{|id| {:id => id}} # => [{:id=>22448500}, {:id=>21928809}, {:id=>21778201}]
 
-        log "#{tracks.length} tracks in playlist"
+        log "#{tracks.count} tracks in playlist"
         log "updating playlist #{playlist.uri}..."
 
         # I suspect SoundCloud API breaks when updating playlists after they
@@ -94,12 +94,6 @@ class SoundCloudUploader
         @client.get("/me/playlists").find do |pl|
             pl.title == @author
         end
-    end
-
-    # helper in case things go south
-    def add_author_tracks_to_playlist
-        playlist = author_playlist
-        STDERR.puts "tracks currently in playlist #{playlist.count}"  
     end
 
     def exists?
@@ -121,7 +115,6 @@ def choke(s)
     exit 0
 end
 
-#choke "Need SCPW env!" unless scpw = ENV['SCPW']
 choke "Need file path as 1st arg!" unless file = ARGV[0]
 choke "Need author as 2nd arg!" unless author = ARGV[1]
 
