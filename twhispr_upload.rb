@@ -68,32 +68,64 @@ class SoundCloudUploader
     def add_to_playlist(track_id)
         playlist = author_playlist
         return false unless playlist
-
-        track_ids = playlist.tracks.map(&:id)
-        track_ids << track_id
-
-        # map array of ids to array of track objects:
-        tracks = track_ids.uniq.map{|id| {:id => id}} # => [{:id=>22448500}, {:id=>21928809}, {:id=>21778201}]
-
-        log "#{tracks.count} tracks in playlist"
         log "updating playlist #{playlist.uri}..."
 
-        # I suspect SoundCloud API breaks when updating playlists after they
-        # get too big...handle the exception gracefully
+        track_ids = playlist.tracks.map(&:id)
+        log "#{track_ids.count} tracks in playlist"
+
         begin
             # send update/put request to playlist
+            track_ids << track_id
             @client.put(playlist.uri, :playlist => {
-                :tracks => tracks
+                :tracks => format_tracks_for_request(track_ids)
             })
         rescue SoundCloud::ResponseError => err
             log "SoundCloud Exception updating playlist! " + err.message
+
+            # If playlist is too large for Soundcloud, start a new one
+            if err.message =~ /422/ && track_ids.count >= 200
+                create_playlist new_playlist_title(playlist), [track_id]
+            end
         end
     end
 
     def author_playlist
-        @client.get("/me/playlists").find do |pl|
-            pl.title == @author
+        @client.get("/me/playlists").find_all { |pl|
+            pl.title =~ /^#{@author}/
+        }
+        .sort_by(&:title)
+        .last
+    end
+
+    # create new playlist from tracklist
+    def create_playlist(title, track_ids)
+        log "Creating new playlist #{title}..."
+
+        begin
+            @client.post('/playlists', :playlist => {
+                :title => title,
+                :sharing => 'public',
+                :tracks => format_tracks_for_request(track_ids)
+            })
+        rescue SoundCloud::ResponseError => err
+            log "SoundCloud Exception creating playlist! " + err.message
+            raise(err) # this is a fatal error
         end
+    end
+ 
+    def new_playlist_title(playlist)
+        suffix = 2
+        if matched = /#{@author}_(\d+)/.match(playlist.title)
+            suffix = matched[1].to_i + 1
+        end
+
+        [@author, suffix].join('_')
+    end
+
+    # @param {Array} tracks track ids
+    # @return [{:id=>22448500}, {:id=>21928809}, {:id=>21778201}]
+    def format_tracks_for_request(tracks)
+        tracks.uniq.map{|id| {:id => id}} 
     end
 
     def exists?
