@@ -9,6 +9,14 @@
 #
 require 'soundcloud'
 
+# Monkeypatch SoundCloud client to debug http
+module SoundCloud
+    class Client
+        # Uncomment this to turn it on
+        #debug_output $stderr
+    end
+end
+
 class SoundCloudUploader
     def initialize(file, author)
         cnf = Psych.load_file(File.join(__dir__, 'config.yml'))
@@ -50,11 +58,28 @@ class SoundCloudUploader
         track.id
     end
 
-    private
+    def playlists(opts = {})
+        # Caching - this is a huge payload
+        @playlists ||= @client.get("/me/playlists", opts || {})
+    end
+
+    def exists?
+        # fetch playlist by author
+        return false unless plist = author_playlist
+
+        # find track by tweet id in tags
+        plist.tracks.find do |t|
+            t.tag_list.split.find do |tag|
+                tag == @id
+            end
+        end
+    end
 
     def log(msg)
         STDERR.puts msg
     end
+
+    private
 
     def make_title
         [@author, @id].join('-')
@@ -90,7 +115,7 @@ class SoundCloudUploader
     end
 
     def author_playlist
-        @client.get("/me/playlists").find_all { |pl|
+        playlists(:q => @author).find_all { |pl|
             pl.title =~ /^#{@author}/
         }
         .sort_by(&:title)
@@ -128,18 +153,6 @@ class SoundCloudUploader
         tracks.uniq.map{|id| {:id => id}} 
     end
 
-    def exists?
-        # fetch playlist by author
-        playlist = author_playlist
-        return false unless playlist
-
-        # find track by tweet id in tags
-        playlist.tracks.find do |t|
-            t.tag_list.split.find do |tag|
-                tag == @id
-            end
-        end
-    end
 end
 
 def choke(s)
@@ -153,6 +166,10 @@ choke "Need author as 2nd arg!" unless author = ARGV[1]
 status = 0
 begin
     scup = SoundCloudUploader.new(file, author)
+    # Debugging 502s from huge playlists payload
+    #lists = scup.playlists
+    #STDERR.puts "playlists returned"
+    #choke lists.map(&:title).join(', ')
     track_id = scup.upload
     status = 1
     puts track_id # print to STDOUT for calling programs to read
