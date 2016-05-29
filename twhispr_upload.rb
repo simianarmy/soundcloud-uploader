@@ -27,9 +27,10 @@ class SoundCloudUploader
           :username      => cnf['username'],
           :password      => cnf['password']
         })
+        @id = File.basename(file, '.mp3')
         @file = file
         @author = author
-        @id = File.basename(file, '.mp3')
+        @title = make_title
     end
 
     # upload an audio file
@@ -39,16 +40,28 @@ class SoundCloudUploader
             return track.id
         end
 
-        log "Uploading #{@file}..."
-        track = @client.post('/tracks', :track => {
-            :title => make_title,
-            :description => @id,
-            :asset_data => File.new(@file, 'rb'),
-            :tag_list => [@id, @author].join(' ')
-            #:shared_to    => {
-            #    :connections => [{:id => twitter_connection.id}]
-            #}
-        })
+        begin
+            log "Uploading #{@file}..."
+            track = @client.post('/me/tracks', :track => {
+                :title => @title,
+                :description => @id,
+                :asset_data => File.new(@file, 'rb'),
+                :tag_list => [@id, @author].join(' ')
+                #:shared_to    => {
+                #    :connections => [{:id => twitter_connection.id}]
+                #}
+            })
+        rescue SoundCloud::ResponseError => err
+            # 504 on upload means it was uploaded but we don't have a track id
+            # If it was uploaded, it will be in the global playlist
+            if err.message =~ /504/
+                log "Got 504 - looking for #{@title} in global playlist."
+                track = search_track_by_title(@client.get("/me/tracks"), @title)
+            else
+                raise err
+            end
+        end
+
         raise "No track object returned!" unless track
         log "uploaded track #{track.id}"
 
@@ -67,8 +80,10 @@ class SoundCloudUploader
         # fetch playlist by author
         return false unless plist = author_playlist
 
-        # find track by tweet id in tags
+        # find track by title or tweet id in tags
         plist.tracks.find do |t|
+            return t if t.title == @title
+
             t.tag_list.split.find do |tag|
                 tag == @id
             end
@@ -91,8 +106,10 @@ class SoundCloudUploader
     end
 
     def add_to_playlist(track_id)
-        playlist = author_playlist
-        return false unless playlist
+        unless playlist = author_playlist
+            return create_playlist @author, [track_id]
+        end
+
         log "updating playlist #{playlist.uri}..."
 
         track_ids = playlist.tracks.map(&:id)
@@ -122,6 +139,10 @@ class SoundCloudUploader
         .last
     end
 
+    def search_track_by_title(tracks, title)
+        tracks.find { |t| t.title == title }
+    end
+
     # create new playlist from tracklist
     def create_playlist(title, track_ids)
         log "Creating new playlist #{title}..."
@@ -137,7 +158,7 @@ class SoundCloudUploader
             raise(err) # this is a fatal error
         end
     end
- 
+
     def new_playlist_title(playlist)
         suffix = 2
         if matched = /#{@author}_(\d+)/.match(playlist.title)
