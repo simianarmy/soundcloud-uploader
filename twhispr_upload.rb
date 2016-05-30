@@ -42,7 +42,7 @@ class SoundCloudUploader
 
         begin
             log "Uploading #{@file}..."
-            track = @client.post('/me/tracks', :track => {
+            track = @client.post('/tracks', :track => {
                 :title => @title,
                 :description => @id,
                 :asset_data => File.new(@file, 'rb'),
